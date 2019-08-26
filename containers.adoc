@@ -1,0 +1,706 @@
+= Containers and OCI Tools Workshop: Exercises in Podman, Buildah, Skopeo, and even docker
+//{set:imagesdir:images}
+:imagesdir: images 
+:pygments-style: emacs
+:source-highlighter: pygments
+:icons: font
+:author: Jim Barlow
+== Lab Exercises
+:toc:
+
+=== Exercise:  Setting up a registry account in Quay
+
+
+TIP: If you already have a registry account someplace that you can use from the lab, you don't need to create another one.  This is just a good place to get one for free.
+
+
+
+We’ll sign up for a free trial account on a registry.   If you have a container registry account already, you can use that.   The exercises are geared to Quay cloud register:
+
+To create the account, go to:
+
+https://quay.io
+
+Sign up for the free account.
+
+NOTE: There is also a $15 / month with up to 5 private repositories available.
+No credit card is required to do the trial.
+
+The easiest is to do the totally free and use publicly visible repositories.
+
+To get the ree account, go to https://quay.io request an account as below:
+
+image::not-a-robot.png[Free Account]
+
+TIP:  I recommend that you check "I am not a robot (even if you really are a robot!)"
+
+
+=== Exercise:  Setting up the Prerequisites on Red Hat Linux
+
+Log in to your instance, as shown in the workshop materials
+
+[source,bash]
+ssh studentXX@xxx.xxx.xxx.xxx       # see the workshop reference.
+
+We want to be on the latest 7.7 version of RHEL for the “rootless” running of containers with the Podman Tool.    We need to run the following command (this will take a couple of minutes):
+
+[source,bash]
+----
+cat > labsetup.yml << UNTILHERE
+---
+- name: Playbook to set up namespaces for the lab exercises
+  hosts: localhost
+  vars:
+  tasks:
+    - name: Update RHEL to >= 7.7
+      become: True
+      yum:
+        name: '*'
+        state: latest
+
+    - name: activate namespaces
+      become: True
+      sysctl:
+        name: user.max_user_namespaces
+        value: '15000'
+        sysctl_set: yes
+        state: present
+        reload: yes
+
+    - name: set subuid properly
+      become: True
+      lineinfile:
+        path: /etc/subuid
+        line: "{{ansible_user }}:100000:65536"
+        create: yes
+
+    - name: set subgid file properly
+      become: True
+      lineinfile:
+        path: /etc/subgid
+        line: "{{ansible_user }}:100000:65536"
+        create: yes
+
+    - name: reboot the system
+      become: True
+      shell: ( sleep 3 && /sbin/reboot & )
+      async: 0
+      poll: 0
+...
+UNTILHERE
+----
+
+The above creates an ansible "yaml" file, as denoted by the labsetup.yml.   Run the following command in order to update your lab system:
+
+[source,bash]
+----
+ansible-playbook labsetup.yml
+----
+
+This will cause the operating system to update to RHEL 7.7, which is our desired version.   If you look closely at the "labsetup.yml" file, you can probably see that it also sets an operating system parameter to allow user namespaces.   The playbook also configures /etc/subuid and /etc/subgid files, so that your username will be able to run containers as your own user.  Therefore, these DO NOT need to run as root.
+
+Wait a few moments before re-logging into the RHEL Instance.   The reboot will be less than a minute.
+
+[source:bash]
+----
+ssh studentXX@xxx.xxx.xxx.xxx  
+# see the workshop reference for student number and
+# ip address.
+----
+
+We now have an up-to-date version of RHEL 7 for use as a container development system.   This could also be a RHEL 8 or a recent Fedora system.
+
+Next, we will install podman, buildah, and skopeo tools, which run “daemonless”, and are well suited for secure container builds.  We will also install docker in order to compare and contrast the two container runtime approaches.
+
+NOTE: We are having you install these manually so you can see what software is needed on the system. 
+Note: Later we will install docker, but docker is NOT NEEDED to run containers with Podman.
+
+[source,bash]
+----
+sudo yum install podman buildah skopeo slirp4netns  -y
+----
+
+
+NOTE: The “docker” tool is the traditional starting point for docker formated docker containers.
+Podman, Buildah, and Skopeo tools, are designed to follow industry standards and be very secure, not requiring the unnecessary use of a daemon running as root.
+
+To be sure that the playbook did the job, of creating and setting up the namespace capabilities, issue he following commands:
+
+[source.bash]
+cat /etc/subuid
+cat /etc/subgid
+
+Your results should look something like this, although your own student number will show in the results:
+
+image::subuid.png[terminal output]
+
+=== Exercise:  Pulling down an image
+
+We will  pull down a Universal Base Image for RHEL. There are three such “UBI”s available at the time of this writing. These UBIs are a great beginner’s starting point for developers, especially if there is not a purpose build container image in the Red Hat Software Collections library.
+
+These are a basic ubi, ubi-minimal, and a ubi that can run an “init” workload.
+
+ registry.access.redhat.com/ubi7/ubi
+ registry.access.redhat.com/ubi7/ubi-minimal
+ registry.access.redhat.com/ubi7/ubi-init
+
+
+The first two images are basic building block images.   The ubi is very flexible, the ubi-minimal is, you guessed it, very minimal.    The third image, ubi-init, is a good building block for containers you want to run using "System-D" -- where you want the OS to automate the running of the images at system boot time.
+
+Let’s pull two of the images down to look at them by running the following three commands:
+
+[source,bash]
+----
+podman pull registry.access.redhat.com/ubi7/ubi
+podman pull registry.access.redhat.com/ubi7/ubi-minimal
+podman images
+
+----
+
+How big are they?  Look to the right side of the podman images output.
+
+The minimal is about 81 MB and the “regular” is about 215 MB.
+These are very small container images for their functionality.
+
+image::image-sizes.png[sizes]
+
+
+=== Exercise:  Inspecting images
+
+
+
+[source,bash]
+----
+podman inspect 967cb403b7ee | less
+
+# replace the hexadecimal IMAGE_ID above with one of the
+# corresponding to one of the images you pulled
+----
+
+
+The expected result is that you will see no containers at this point.  It is time to create a container from an image.
+
+=== Exercise: Using an Apache pre-built Container Image
+
+We will pull and inspect another image to see how it is set-up.   This image from the Red Hat Software Collections is particularly flexible in the way it is written.  It uses an httpd (Apache) server and modules written to match the RHEL kernel:
+
+
+[source,bash]
+podman pull registry.access.redhat.com/rhscl/httpd-24-rhel7
+
+Note that an identifier will be returned.    You may use the whole identifier (65 Characters!), or the first 12 characters.  With 65 characters this will assuredly be a unique identifier.   If you use only the first 12 characters, there is a 1 in 4.7 e+18 chance of a conflict.   I'm feeling lucky.
+
+Inspect that image using the signature.   Replace 7cb4d0eb07a5 with whichever identifier you received.
+
+[source,bash]
+podman inspect 7cb4d0eb07a5 | less
+
+
+Examined the returned json object, and note the config section, particularly the network ports and the user section:
+
+[source]
+
+        "Config": {
+            "User": "1001",
+            "ExposedPorts": {
+                "8080/tcp": {},
+                "8443/tcp": {}
+
+The ports are higher number ( > = 1024 ) ports so that the container can be run as “non-root”.   Only root equivalent processes can be exposed in Linux as < = 1023
+
+Note: several references in the json returned object mention “source to image”   For more information on how to use Red Hat Software Collections builder containers, refer to this document:
+
+The “Env”: List is a list of Environment Variables used within the container.   
+
+Environment variables can be “overwritten” by passing environment variables on the command line when invoking a container “run” command.   You will see this with the *-e* parameter.   
+
+This capability lets you use the same image in different settings.   You will want to have your scripts pass these variables, or better yet,have a container platform, such as OpenShift, do that for you.
+
+=== Curated Base Container Images from Red Hat
+
+Here is the list of container images from the Red Hat Software Collections available and how to use them.
+
+https://access.redhat.com/documentation/en-us/red_hat_software_collections/3/html-single/using_red_hat_software_collections_container_images/index[Red Hat Base Image Catalog] 
+
+=== Exercise: Starting the Container
+
+let’s see if any containers are currently running with the podman process status command. This is checking for containers running in *your* user space, not the root user space:
+
+[source,bash]
+podman ps
+
+The expected result from the command above is none should be running.
+
+Now is a good time to create and run a container from our downloaded image.
+
+Once again, substitute the container_id that matches your image if it is not 7cb4d0eb07a5.   We will learn to custom label our container images and containers later.
+[source,bash]
+podman run --name myapache 7cb4d0eb07a5
+
+Note that a container has been created.   It has a hexadecimal “CONTAINER ID”, but since we specified a name, it can be accessed by either the “CONTAINER ID” or the name, “myapache”.
+
+Note also, we started the container, and it is running in the foreground.
+We didn’t use the “-d” flag to put it into background.  
+Running the container in the foreground gives us some insights on how it runs.
+
+The last line shows that within the container, the process running will be ‘httpd -D FOREGROUND”.
+The container is set up so that the logs produced by apache will go to stdout “Standard Out”, so that an orchestration layer can collect them easily and process them.
+This is something that a container platform application typically does for you.
+
+[source,bash]
+Type <Control-C> to quit the container running in the foreground
+
+Now we will do a run command with the "*-d*" flag to put the process in the background.
+First we will remove the current container, so we can reuse the “myapache” name.
+
+[source,bash]
+podman rm myapache
+
+Then we will re-create a new container, and start it in the background.
+
+[source,bash]
+podman run -d  --name myapache 7cb4d0eb07a5
+
+Let us revisit the "*ps*" sub command to see the results:
+
+[source,bash]
+----
+podman ps
+
+podman stop myapache
+
+podman ps      # note the stop command removed the container from this listing.
+
+podman ps -a    # podman ps -a (all, running or not) shows that the container is still there.
+
+podman restart myapache
+
+podman ps
+----
+
+TIP: If you get an error that myapache already exists when trying to do a podman run, it is because you missed the steps of “podman stop” and “podman remove” above.
+This reveals a running container named myapache, already exists.
+
+If we do not want a container to persist after our run, we can add the "*--rm*" flag to our run statement.   This automatically removes the container when it stops.   This is commonly done in the container development process.
+
+== Exercise:   The use of "*--rm*" in podman run
+
+TIP: A lot of times we are working interactively to test images, and we don't want to keep the last container around
+
+[source,bash]
+----
+podman run -d --rm --name myapache 7cb4d0eb07a5
+
+podman ps   #there it is
+
+podman stop myapache
+
+podman ps  # of course it is no longer running
+
+podman ps -a  # now the stopped container is gone
+----
+
+This can be very handy during iterative testing.
+
+Next, Let’s build our own new container image to contain an Apache server and index.html file.
+
+=== Exercise: Build a container as a non-privileged user
+
+This exercise creates an image from a “Universal Base Image”, or UBI.   
+We will add the httpd (Apache) with the "yum" installation command.
+The "rm -rf" removes temporary directories and files that are used in the yum build process.
+We don't want these in our running container.
+
+Create the following "Dockerfile" file by pasting this text into your terminal session:
+
+[source,bash]
+----
+cat > Dockerfile << UNTILHERE
+FROM registry.access.redhat.com/ubi7/ubi
+USER root
+LABEL maintainer="John Doe"
+RUN yum update --disableplugin=subscription-manager -y && rm -rf /var/cache/yum
+RUN yum install --disableplugin=subscription-manager httpd -y && rm -rf /var/cache/yum
+RUN echo "The Web Server is Running" > /var/www/html/index.html
+EXPOSE 80
+CMD ["-D", "FOREGROUND"]
+ENTRYPOINT ["/usr/sbin/httpd"]
+UNTILHERE
+----
+
+If you did this right, and we wrote the snippet above corectly, you will have a Dockerfile in your current directory.    
+
+A Dockerfile is a script to direct podman, (or docker if you sill use that) in how to build a container image layer by layer.
+
+The command line says build this with podman, the  “.” means look in this directory for “Dockerfile”, and the -t means name (title) the image “mywebserver”
+
+[source,bash]
+podman build . -t mywebserver
+
+If you are curious about all of the things that can go into a “Dockerfile” scripting language, here is a great reference: 
+
+https://design.jboss.org/redhatdeveloper/marketing/docker_cheatsheet/cheatsheet/images/docker_cheatsheet_r3v2.pdf[Dockerfile Cheat Sheet]
+
+
+=== Exercise: Running as “not root”
+
+Each of our podman runs has been run as your own non-root username.   When we do this, we need to run as a 
+
+[source,bash]
+podman run -d -p 8080:80 --name mywebcontainer mywebserver
+
+A higher port number (>=) 1024 must be used when the process is not running with “root” privileges.
+
+=== Exercise: Accessing a running container
+
+It is possible for podman to access a running container if it has a shell in it, such as bash.   To do that use the “exec” command, and specify /bin/bash as the task.    
+This can be handy in debugging, but it is likely something you would want to remove from a production image and container.
+
+[source,bash]
+----
+podman exec -it mywebcontainer /bin/bash
+----
+
+You will receive a prompt within the container.
+Try an ls command to list the files in the container.    
+Use the “whoami” command to see what user you are in within the container.
+
+[source,bash]
+----
+ls -l
+
+# you will see the file structure in the container.
+
+whoami
+----
+
+image::im_root_in_container.png[Looks like root inside]
+
+
+NOTE: This is NOT the user that the container runs as in the system.
+
+Let us see what the container is running as in the VM.
+
+[source,bash]
+exit
+
+You will be back at the OS.
+
+[source,bash]
+ps -aux | grep mywebcontainer
+
+This results in a big output. But I've highlighted the part that shows which user permissions the container runs with.    It is running as yourself, not as root.
+
+image::it_is_us.png[]
+
+
+We can Access the httpd webpage.  
+After all this, it would be nice to see that the Apache instance is running with our web page, as modest as that is.
+
+[source,bash]
+curl localhost:8080
+
+Do you see a string that is embedded in your Dockerfile?
+
+Of course your real web projects will require you to copy the contents into your container builds, and will be much more involved!
+
+== Exercise: Persistent Storage Volumes for Your Container
+
+Many containers will need “persistent” storage.    A database is a prime example.   We will use MySQL here.
+
+We will use a containerized database.  
+Database applications are notorious for wanting to keep your data intact!
+We will need to download and install the MySQL client first, do the following:
+
+[source,bash]
+wget https://repo.mysql.com/mysql80-community-release-el7-1.noarch.rpm
+sudo yum install mysql80-community-release-el7-1.noarch.rpm
+sudo yum repolist enabled | grep "mysql.*-community.*"
+sudo yum install mysql-community-client -y
+
+mysql --version should show a version 8.0.xx
+
+Now, let's install mysql server as a container.
+First, we grab it from the Red Hat Software Collections registry.
+
+[source,bash]
+----
+podman pull registry.access.redhat.com/rhscl/mysql-80-rhel7
+----
+
+We will also need to provide a mount point for the persistent storage.
+We are going to use a directory on our virtual machine for this storage.
+In actual practice, your Container Management System, ( Did I mention OpenShift :-)) would automate safe persistent volumes for you.
+
+We’ll make five mount points:
+
+[source,bash]
+----
+sudo mkdir /mnt/volume{1,2,3,4,5}
+sudo chmod -R 777 /mnt/volume*
+# Let’s get the SELinux context correct:
+sudo chcon -Rt container_file_t /mnt/volume*
+restorecon /mnt
+----
+
+Now create the container for MySQL 8.0.   Note the use of the -v parameter, this is exactly where we specify the “directory on the host”:”directory in the container” designation for mapping the storage.
+
+[source,bash]
+----
+podselectman run -it  -d --name mysql_database \
+-e MYSQL_USER=dbbeing \
+-e MYSQL_PASSWORD=mypass \
+-e MYSQL_DATABASE=db \ 
+-e MYSQL_ROOT_PASSWORD=rootpass \
+-p 3306:3306 \ 
+-v /mnt/volume1:/var/lib/mysql/data \ 
+rhscl/mysql-80-rhel7
+----
+
+Note above the use environment variables for the container that are passed to the podman or docker daemon.  These mandatory environment variables follow the “-e” parameter, and are spelled out in the usage guide and the documentation revealed by the “podman inspect” command.
+
+image::MYSQL-ENV-VARS.png["Connection Variables"]
+
+More information on these builder images can be found at the Red Hat Software Collections Guide:
+
+https://access.redhat.com/documentation/en-us/red_hat_software_collections/3/html-single/using_red_hat_software_collections_container_images/index[Red Hat Software Collections Guide Container Image Documentation]
+
+Now we will attach to the database via the command line client.    
+We will use a network socket to attach, and need to specify the IP Address and the port number:
+
+[source.bash]
+mysql -u root -p  -h 127.0.0.1 -P 3306
+
+Within the client, we will create a database, you can call it anything you like, I called mine payment_sys:
+
+[source.bin.bash]
+
+show databases ;
+create database payment_sys ;
+show databases ;
+quit
+
+Here is what I got:
+
+image::Database_success.png[It Worked]
+
+Now perform the following steps to see if the storage is indeed persistent:
+
+Stop the running mysql container -- (you've done this before)
+
+Remove the container -- (use the rm command)
+
+Recreate the container with the exact parameters you used when you first set it up -- use the same copy / paste command.
+
+Log back into the database as you did above in the previous step.
+
+[source,mysql]
+show databases ;
+
+Is the database you created still there?   
+That’s persistent storage.
+
+=== Exercise: Tagging and pushing images to a registry
+
+Labeling and pushing images to a registry is a matter of labeling the image, and then using the push command.
+
+Log into the repository:
+
+[source,bash]
+podman login quay.io
+Username: “my_user”
+Password:
+Login Succeeded!
+
+Create a “repository” in the registry. 
+A repository corresponds to multiple versions of the same container image.     
+I’ve done this through the GUI at quay.io
+
+image:quay2.png[create a repository]
+
+
+Let’s modify a container and commit the changes to our local registry so that we can push and tag it to our remote repository.
+
+First we will run an instance of the ubi
+
+[source,bash]
+----
+podman run -d -it --name=myrhelubi \
+registry.access.redhat.com/ubi7/ubi
+----
+
+Then login to it.
+
+[source,bash]
+podman exec -it myrhelubi /bin/bash
+
+Install the Apache Web Server
+
+[source,bash]
+----
+yum install httpd -y
+exit
+----
+
+commit the changes to create a new container image based on the UBI and your changes
+
+[source,bash]
+podman commit myrhelubi ubi-httpd
+
+Now, in Quay, make sure we have the right information with which to tag the repository.  in my case, the tag I will need can be grabbed form the "docker pull" example.
+
+image:quay3.png[This shows the repo name]
+
+Let's tag the image with more information so it is more useful and identifieble in the repositories.
+
+TIP: Be sure to replace my quay.io username with your own.  
+"payment_sys" is an arbitrary version tag name.   If you omit this, the that tag will be the default "latest"
+
+[source,bash]
+----
+podman tag ubi-httpd quay.io/jdbarlow/ubi-httpd:payment_sys
+----
+image:quay4.png[]
+
+podman push ubi-httpd quay.io/jdbarlow/ubi-httpd
+
+Note that the IMAGE_ID is the same for the thwo repositories identified by localhost, and quay.io
+
+Now we can push the image with the command (substitute your actual IMAGE ID), and your actual username at quay.io:
+
+[source,python]
+podman push quay.io/jdbarlow/ubi-httpd:payment_sys
+
+image:quay_pushed_tags.png[]
+
+Here is the result.   The repository name is at the top, and the tag payment_sys is on the left.   Note also that the container image passed a security scan for vulnerabilities, which is a feature of the quay.io service
+
+=== Exercise: cgroups quotas for Docker
+
+First of all, here is a container that can generate stress on your system.   We make nor warranties for the viability or safety of this test.   I just found it at dockerhub, worst known method of container security!   We will use:
+
+https://github.com/progrium/docker-stress 
+
+For this exercise, log in to your instance twice, in two terminal windows, or two terminals, or if you are fancy, use something like tmux to multiplex. 
+
+Run the following command in one terminal
+
+[source,bash]
+----
+sudo docker run --rm -it --name testit progrium/stress \
+--cpu 2 --io 1 --vm 2 --vm-bytes 512M --timeout 500s
+----
+Run the following command in another terminal:
+
+[source,bash]
+sudo docker stats testit
+
+Now stop the load generator (or let it time out) and restart with the “--cpus=”.2” flag.   That indicates about .2 cores.   You can play around with this setting and see how things behave.
+
+=== limiting to ⅕ of a CPU
+sudo docker run --rm -it --cpus=".2" --name testit progrium/stress --cpu 2 --io 1 --vm 2 --vm-bytes 128M --timeout 30s
+
+
+
+
+
+
+Quotas can also be set up for memory by using the  --memory=120m  (120 megabytes), as an example.   Memory limitations have to be used carefully in order to not interfere with the application's operation.
+
+
+== Exercise: Source 2 Image
+
+Install the source 2 image binary on your virtual machine
+
+[source,bash]
+sudo yum install s2i -y
+
+The following command will run the source 2 image application to do an automatic build of a container image, and launch of the container.   It will use load git based software on a specified container image.    This is actually a part of the OpenShift container platform, and that platform makes this type of operation nearly automatic.
+
+[source,bash]
+----
+sudo s2i build https://github.com/openshift/sti-python.git --context-dir=3.6/test/setup-test-app/ rhscl/python-36-rhel7 python-36-rhel7-app
+----
+
+Now we can start the application with docker run.
+
+[source,bash]
+sudo docker run -d -p 8080:8080 --name example-app python-36-rhel7-app
+
+Demo:  Buildah
+
+Buildah Scratch Builds (Distroless) are easy to do, and they can be done rootless.    We will do a demo on this in the session.   The demos are accessible to you within the following git repository:
+
+https://github.com/containers/demos
+
+== Resources
+
+git clone https://github.com/containers
+
+Excellent RHEL 8 example:
+https://www.youtube.com/watch?v=EXpIrlkCDDY[Brian Smith YouTube] 
+
+
+https://www.redhat.com/sysadmin/getting-started-buildah[Getting started with Buildah by Chris Collins]
+
+https://opensource.com/article/19/2/how-does-rootless-podman-work[How does rootless Podman work?] 
+
+
+https://opensource.com/article/19/3/tips-tricks-rootless-buildah[Blog: How does rootless Buildah work?] 
+
+ 
+https://github.com/opencontainers/image-spec/blob/master/spec.md[OCI Image Specification] 
+
+https://github.com/TomasTomecek/ansible-bender[Ansible Bender for building containers with Buildah] 
+
+Rootless Builds
+https://access.redhat.com/solutions/3911401
+
+Distroless containers:  Does the distribution still matter?
+https://opensource.com/article/19/2/linux-distributions-still-matter-containers[Article by Scott McCarty]
+
+
+https://www.ianlewis.org/en/tag/container-runtime-series[History and background of container runtimes] 
+
+Ansible Role for Building a Podman Container
+https://redhatnordicssa.github.io/ansible-podman-containers-1 
+Ansible Role for Building (Compose) Multiple Containers
+
+https://pypi.org/project/ansible-bender/[Installation source: Ansible Bender - Ansible for Buildah] 
+
+
+https://github.com/tosin2013/cri_o_playground[Tosin Akinosho's CRIO-O and OCI Tools Text and Examples ]
+
+
+https://developers.redhat.com/blog/2019/02/21/podman-and-buildah-for-docker-users/[Article: Podman and Buildah for Docker Images] 
+
+
+https://www.redhat.com/en/blog/introducing-red-hat-universal-base-image[Article: The Red Hat UBI (Universal Base Image) reasons and strategy]
+
+
+https://jaxenter.com/build-containers-quickly-buildah-155839.html[Buildah quick Intro]
+
+
+https://github.com/containers/libpod/blob/master/docs/tutorials/podman_tutorial.md[Podman Tutorial] 
+
+http://starter-guides-labs.b9ad.pro-us-east-1.openshiftapps.com/workshop/workshop/lab/parksmap-docker[OpenShift Developer Starter Workshop Labs Guide]
+
+https://www.redhat.com/en/blog/introducing-red-hat-universal-base-image[Introducing the Red Hat Universal Base Image] 
+
+
+https://access.redhat.com/articles/1328953[Create a basic Web Server in a container] 
+
+
+https://access.redhat.com/containers/#/explore[Link: Browsable Red Hat Container Catalog] 
+
+
+https://www.redhat.com/en/blog/using-rootless-containers-tech-preview-rhel-80[Blog Article: Scott McCarty's Using Rootless Containers]
+
+
+
+
+
+
+
+
+
