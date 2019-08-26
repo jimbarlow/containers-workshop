@@ -13,8 +13,6 @@
 
 TIP: If you already have a registry account someplace that you can use from the lab, you don't need to create another one.  This is just a good place to get one for free.
 
-
-
 We’ll sign up for a free trial account on a registry.   If you have a container registry account already, you can use that.   The exercises are geared to Quay cloud register:
 
 To create the account, go to:
@@ -33,7 +31,6 @@ To get the ree account, go to https://quay.io request an account as below:
 image::not-a-robot.png[Free Account]
 
 TIP:  I recommend that you check "I am not a robot (even if you really are a robot!)"
-
 
 === Exercise:  Setting up the Prerequisites on Red Hat Linux
 
@@ -283,7 +280,9 @@ This reveals a running container named myapache, already exists.
 
 If we do not want a container to persist after our run, we can add the "*--rm*" flag to our run statement.   This automatically removes the container when it stops.   This is commonly done in the container development process.
 
-== Exercise:   The use of "*--rm*" in podman run
+=== Exercise: Handy Podman Arguments   
+
+The use of "*--rm*" in podman 
 
 TIP: A lot of times we are working interactively to test images, and we don't want to keep the last container around
 
@@ -299,6 +298,8 @@ podman ps  # of course it is no longer running
 
 podman ps -a  # now the stopped container is gone
 ----
+
+Now there are no more "container with that name exits" errors when you want to repeat a podman run command.
 
 This can be very handy during iterative testing.
 
@@ -341,20 +342,23 @@ If you are curious about all of the things that can go into a “Dockerfile” s
 
 https://design.jboss.org/redhatdeveloper/marketing/docker_cheatsheet/cheatsheet/images/docker_cheatsheet_r3v2.pdf[Dockerfile Cheat Sheet]
 
-
 === Exercise: Running as “not root”
 
-Each of our podman runs has been run as your own non-root username.   When we do this, we need to run as a 
+Each of our podman runs has been run as your own non-root username.   When we do this, we are running as your own user.    We can leave user names out of the container build, so that they can be assigned as run time.
+
+One aspect of not running as root is that you need to run with higher port numbers.
+
+The following command exposes the httpd server on port 8080 of the OS, but Apache is configured as port 80 within the container.
 
 [source,bash]
 podman run -d -p 8080:80 --name mywebcontainer mywebserver
 
 A higher port number (>=) 1024 must be used when the process is not running with “root” privileges.
 
-=== Exercise: Accessing a running container
+==== Exercise: Accessing a running container to examine user privilege
 
 It is possible for podman to access a running container if it has a shell in it, such as bash.   To do that use the “exec” command, and specify /bin/bash as the task.    
-This can be handy in debugging, but it is likely something you would want to remove from a production image and container.
+This can be handy in debugging, but shells are something you might want to remove from a production image and container.
 
 [source,bash]
 ----
@@ -375,7 +379,6 @@ whoami
 ----
 
 image::im_root_in_container.png[Looks like root inside]
-
 
 NOTE: This is NOT the user that the container runs as in the system.
 
@@ -404,7 +407,7 @@ Do you see a string that is embedded in your Dockerfile?
 
 Of course your real web projects will require you to copy the contents into your container builds, and will be much more involved!
 
-== Exercise: Persistent Storage Volumes for Your Container
+=== Exercise: Persistent Storage Volumes for Your Container
 
 Many containers will need “persistent” storage.    A database is a prime example.   We will use MySQL here.
 
@@ -575,9 +578,11 @@ image:quay_pushed_tags.png[]
 
 Here is the result.   The repository name is at the top, and the tag payment_sys is on the left.   Note also that the container image passed a security scan for vulnerabilities, which is a feature of the quay.io service
 
-=== Exercise: cgroups quotas for Docker
+=== Exercise: C-GROUPS and Quotas for Docker
 
-First of all, here is a container that can generate stress on your system.   We make nor warranties for the viability or safety of this test.   I just found it at dockerhub, worst known method of container security!   We will use:
+==== Generating Container Test Loads 
+
+Here is a container that can generate stress on your system.   We make nor warranties for the viability or safety of this test.   I just found it at dockerhub, worst known method of container security!   We will use:
 
 https://github.com/progrium/docker-stress 
 
@@ -597,18 +602,13 @@ sudo docker stats testit
 
 Now stop the load generator (or let it time out) and restart with the “--cpus=”.2” flag.   That indicates about .2 cores.   You can play around with this setting and see how things behave.
 
-=== limiting to ⅕ of a CPU
+==== Limiting CPU Utilization in a Host.
 sudo docker run --rm -it --cpus=".2" --name testit progrium/stress --cpu 2 --io 1 --vm 2 --vm-bytes 128M --timeout 30s
-
-
-
-
-
 
 Quotas can also be set up for memory by using the  --memory=120m  (120 megabytes), as an example.   Memory limitations have to be used carefully in order to not interfere with the application's operation.
 
 
-== Exercise: Source 2 Image
+=== Exercise: Source 2 Image
 
 Install the source 2 image binary on your virtual machine
 
@@ -627,15 +627,15 @@ Now we can start the application with docker run.
 [source,bash]
 sudo docker run -d -p 8080:8080 --name example-app python-36-rhel7-app
 
-Demo:  Buildah
-
-Buildah Scratch Builds (Distroless) are easy to do, and they can be done rootless.    We will do a demo on this in the session.   The demos are accessible to you within the following git repository:
+=== TODO: Using Buildah for Builds
 
 https://github.com/containers/demos
 
+=== TODO: Skopeo for Examination of Remote Repositories
+
 == Resources
 
-git clone https://github.com/containers
+https://github.com/containers[OCI Containers Tools GitHUB Repository]
 
 Excellent RHEL 8 example:
 https://www.youtube.com/watch?v=EXpIrlkCDDY[Brian Smith YouTube] 
