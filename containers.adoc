@@ -22,7 +22,7 @@ https://quay.io
 Sign up for the free account.
 
 NOTE: There is also a $15 / month with up to 5 private repositories available.
-No credit card is required to do the trial.
+No credit card is required to do the trial for the "Pro" subscription.
 
 The easiest is to do the totally free and use publicly visible repositories.
 
@@ -39,7 +39,40 @@ Log in to your instance, as shown in the workshop materials
 [source,bash]
 ssh studentXX@xxx.xxx.xxx.xxx       # see the workshop reference.
 
-We want to be on the latest 7.7 version of RHEL for the “rootless” running of containers with the Podman Tool.    We need to run the following command (this will take a couple of minutes):
+We want to be on the latest 7.7 version of RHEL for the “rootless” running of containers with the Podman Tool.    We need to run the following commands (this will take a couple of minutes):
+
+==== Do you have Ansible installed?
+
+[source,bash]
+$ ansible --version     
+
+The above command will fail if you do not have ansible installed.
+
+If you have Ansible installed, skip the next section.
+
+==== If Needed, Install Ansible
+
+If you do not have Ansible installed, install the "EPEL library", and then install Ansible.
+
+Install the wget command, then the EPEL Library, and then Ansible:
+
+[source,bash]
+----
+$ sudo yum install wget, git, vim, nano -y
+$ cd /tmp
+wget https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+
+$ sudo yum install epel-release-latest-7.noarch.rpm
+
+$ cd -  # return to original directory
+
+$ sudo yum install ansible -y  # install ansible
+----
+
+
+Now we are ready to run our configuration playbook for RHEL 7 or CentOS 7
+
+[source]
 
 [source,bash]
 ----
@@ -53,6 +86,17 @@ cat > labsetup.yml << UNTILHERE
       become: True
       yum:
         name: '*'
+        state: latest
+
+    - name: Ensure some packages are installed
+      vars:
+        packages_to_install:
+          - git
+          - vim
+          - nano
+          - docker
+      yum:
+        name: "{{ packages_to_install }}" 
         state: latest
 
     - name: activate namespaces
@@ -91,10 +135,15 @@ The above creates an ansible "yaml" file, as denoted by the labsetup.yml.   Run 
 
 [source,bash]
 ----
-ansible-playbook labsetup.yml
+$ ansible-playbook labsetup.yml --ask-become-pass
+
+# when asked for the BECOME: password, enter your login password.   
+# This is much like sudo.
 ----
 
-This will cause the operating system to update to RHEL 7.7, which is our desired version.   If you look closely at the "labsetup.yml" file, you can probably see that it also sets an operating system parameter to allow user namespaces.   The playbook also configures /etc/subuid and /etc/subgid files, so that your username will be able to run containers as your own user.  Therefore, these DO NOT need to run as root.
+This will cause the operating system to update to RHEL 7.7, which is our desired version.   If you look closely at the "labsetup.yml" file, you can probably see that it also sets an operating system parameter to allow user namespaces.   The playbook also configures /etc/subuid and /etc/subgid files, so that your username will be able to run containers as your own user.  Therefore, OCI Tools DO NOT need to run as root.
+
+Note that we are installing *but not running or enabling* the docker daemon.   We will do some labs with docker too.
 
 Wait a few moments before re-logging into the RHEL Instance.   The reboot will be less than a minute.
 
@@ -114,7 +163,7 @@ Note: Later we will install docker, but docker is NOT NEEDED to run containers w
 
 [source,bash]
 ----
-sudo yum install podman buildah skopeo slirp4netns  -y
+$ sudo yum install podman buildah skopeo slirp4netns  -y
 ----
 
 
@@ -124,8 +173,8 @@ Podman, Buildah, and Skopeo tools, are designed to follow industry standards and
 To be sure that the playbook did the job, of creating and setting up the namespace capabilities, issue he following commands:
 
 [source.bash]
-cat /etc/subuid
-cat /etc/subgid
+$ cat /etc/subuid
+$ cat /etc/subgid
 
 Your results should look something like this, although your own student number will show in the results:
 
@@ -141,16 +190,15 @@ These are a basic ubi, ubi-minimal, and a ubi that can run an “init” workloa
  registry.access.redhat.com/ubi7/ubi-minimal
  registry.access.redhat.com/ubi7/ubi-init
 
-
 The first two images are basic building block images.   The ubi is very flexible, the ubi-minimal is, you guessed it, very minimal.    The third image, ubi-init, is a good building block for containers you want to run using "System-D" -- where you want the OS to automate the running of the images at system boot time.
 
 Let’s pull two of the images down to look at them by running the following three commands:
 
 [source,bash]
 ----
-podman pull registry.access.redhat.com/ubi7/ubi
-podman pull registry.access.redhat.com/ubi7/ubi-minimal
-podman images
+$ podman pull registry.access.redhat.com/ubi7/ubi
+$ podman pull registry.access.redhat.com/ubi7/ubi-minimal
+$ podman images
 
 ----
 
@@ -164,11 +212,9 @@ image::image-sizes.png[sizes]
 
 === Exercise:  Inspecting images
 
-
-
 [source,bash]
 ----
-podman inspect 967cb403b7ee | less
+$ podman inspect 967cb403b7ee | less
 
 # replace the hexadecimal IMAGE_ID above with one of the
 # corresponding to one of the images you pulled
@@ -180,7 +226,6 @@ The expected result is that you will see no containers at this point.  It is tim
 === Exercise: Using an Apache pre-built Container Image
 
 We will pull and inspect another image to see how it is set-up.   This image from the Red Hat Software Collections is particularly flexible in the way it is written.  It uses an httpd (Apache) server and modules written to match the RHEL kernel:
-
 
 [source,bash]
 podman pull registry.access.redhat.com/rhscl/httpd-24-rhel7
@@ -203,7 +248,7 @@ Examined the returned json object, and note the config section, particularly the
                 "8080/tcp": {},
                 "8443/tcp": {}
 
-The ports are higher number ( > = 1024 ) ports so that the container can be run as “non-root”.   Only root equivalent processes can be exposed in Linux as < = 1023
+The ports are higher number ( > = 1024 ) ports so that the container can be run as “non-root”.   Only root privileged users or  processes start services that expose ports in Linux 0 - 1023.
 
 Note: several references in the json returned object mention “source to image”   For more information on how to use Red Hat Software Collections builder containers, refer to this document:
 
@@ -578,9 +623,55 @@ image:quay_pushed_tags.png[]
 
 Here is the result.   The repository name is at the top, and the tag payment_sys is on the left.   Note also that the container image passed a security scan for vulnerabilities, which is a feature of the quay.io service
 
-=== Exercise: C-GROUPS and Quotas for Docker
+=== Exercise: Images, C-GROUPS, and quotas  for Docker
+
+==== Starting the Docker daemon
+
+At this stage, we start the docker daemon, and explain the suble differences on how you would work with docker vs. podman.
+
+Let's pull an image with docker, like we would with podman.
+
+What in the name of non-root tools happened caused the error?  Here is what I got when I ran the command:
+
+image:docker_daemon.png[It want's a daemon!]
+
+Let us start the daemon (note the sudo), and try again
+
+[source,bash]
+----
+$ sudo systemctl start docker
+
+$ docker pull registry.access.redhat.com/ubi7/ubi-minimal
+----
+
+What is it this time?
+
+image:docker_as_root.png[]
+
+You need to have root privileges to pull a container? Craaaazy if you ask me.
+
+[source,bash]
+$ sudo docker pull registry.access.redhat.com/ubi7/ubi-minimal
+
+sudo is our friend here.   The docker commands are the same as the podman commands (actually the docker commands came first).    You have to preface them with sudo, and have the root privileged daemon running as well.
+
+WARNING: The security folks generally do not like having an extra daemon running with root privileges.   This prevents proper logging as the user involved, if security issues or a compromise is found.   It is also an inherent attack surface.
+
+==== Where are docker and podman (oci) images stored?
+
+The docker daemon (the docker command line interface is a user client of the docker daemin) stores its images in /var/lib/ file structure on Red Hat type of operating systems.
+
+podman (when not run as root) stores the images in your home directory under ~/.local/share/containers/storage
+
+So you may want to choose how you monitor the storage required appropriately.
 
 ==== Generating Container Test Loads 
+
+Docker daemon run containers are generally constrained in how much CPU and IO resources are available by your container platform (Have I mentioned OpenShift?)
+
+On a single host or VM, this can be done by cgroups.    Podman run containers are different, in that they run in the constraint of their user settings.
+
+Let's figure out how to prove enforcement in the docker daemon.
 
 Here is a container that can generate stress on your system.   We make nor warranties for the viability or safety of this test.   I just found it at dockerhub, worst known method of container security!   We will use:
 
@@ -598,34 +689,37 @@ sudo docker run --rm -it --name testit progrium/stress \
 Run the following command in another terminal:
 
 [source,bash]
-sudo docker stats testit
+$ sudo docker stats testit
 
 Now stop the load generator (or let it time out) and restart with the “--cpus=”.2” flag.   That indicates about .2 cores.   You can play around with this setting and see how things behave.
 
+monitor any changes with the "sudo docker stats" command run as above.
+
 ==== Limiting CPU Utilization in a Host.
-sudo docker run --rm -it --cpus=".2" --name testit progrium/stress --cpu 2 --io 1 --vm 2 --vm-bytes 128M --timeout 30s
+
+[source,bash]
+$ sudo docker run --rm -it --cpus=".2" --name testit progrium/stress --cpu 2 --io 1 --vm 2 --vm-bytes 128M --timeout 30s
 
 Quotas can also be set up for memory by using the  --memory=120m  (120 megabytes), as an example.   Memory limitations have to be used carefully in order to not interfere with the application's operation.
-
 
 === Exercise: Source 2 Image
 
 Install the source 2 image binary on your virtual machine
 
 [source,bash]
-sudo yum install s2i -y
+$ sudo yum install s2i -y
 
 The following command will run the source 2 image application to do an automatic build of a container image, and launch of the container.   It will use load git based software on a specified container image.    This is actually a part of the OpenShift container platform, and that platform makes this type of operation nearly automatic.
 
 [source,bash]
 ----
-sudo s2i build https://github.com/openshift/sti-python.git --context-dir=3.6/test/setup-test-app/ rhscl/python-36-rhel7 python-36-rhel7-app
+$ sudo s2i build https://github.com/openshift/sti-python.git --context-dir=3.6/test/setup-test-app/ rhscl/python-36-rhel7 python-36-rhel7-app
 ----
 
 Now we can start the application with docker run.
 
 [source,bash]
-sudo docker run -d -p 8080:8080 --name example-app python-36-rhel7-app
+$ sudo docker run -d -p 8080:8080 --name example-app python-36-rhel7-app
 
 === TODO: Using Buildah for Builds
 
@@ -633,7 +727,7 @@ https://github.com/containers/demos
 
 === TODO: Skopeo for Examination of Remote Repositories
 
-== Resources
+== Resources:
 
 https://github.com/containers[OCI Containers Tools GitHUB Repository]
 
