@@ -91,6 +91,7 @@ cat > labsetup.yml << UNTILHERE
     - name: Ensure some packages are installed
       vars:
         packages_to_install:
+          - jq 
           - git
           - vim
           - nano
@@ -678,7 +679,7 @@ Here is a container that can generate stress on your system.   We make nor warra
 https://github.com/progrium/docker-stress 
 
 For this exercise, log in to your instance twice, in two terminal windows, or two terminals, or if you are fancy, use something like tmux to multiplex. 
-
+ docker
 Run the following command in one terminal
 
 [source,bash]
@@ -694,6 +695,7 @@ $ sudo docker stats testit
 Now stop the load generator (or let it time out) and restart with the “--cpus=”.2” flag.   That indicates about .2 cores.   You can play around with this setting and see how things behave.
 
 monitor any changes with the "sudo docker stats" command run as above.
+
 
 ==== Limiting CPU Utilization in a Host.
 
@@ -726,6 +728,64 @@ $ sudo docker run -d -p 8080:8080 --name example-app python-36-rhel7-app
 https://github.com/containers/demos
 
 === TODO: Skopeo for Examination of Remote Repositories
+
+For more information see :
+https://github.com/containers/skopeo[Skopeo Home Page]
+
+Skopeo works with API V2 registries such as Docker registries, the Atomic registry, private registries, local directories and local OCI-layout directories. Skopeo does not require a daemon to be running to perform these operations which consist of:
+
+* Copying an image from and to various storage mechanisms. For example you can copy images from one registry to another, without requiring privilege.
+* Inspecting a remote image showing its properties including its layers, without requiring you to pull the image to the host.
+* Deleting an image from an image repository.
+* When required by the repository, skopeo can pass the appropriate credentials and certificates for authentication.
+
+==== Skopeo Exercises
+
+===== Remote Inspection
+Let's examine an RHSCL container image in the Red Hat registry, without pulling it.  
+
+[source,bash]
+$ skopeo inspect docker://registry.access.redhat.com/ubi7/ubi-minimal
+
+Here docker:// is used to specify a transport system.  This means that skopeo is being told this is a docker api compliant registry.   We get back a big json object.
+
+What if you want one element from a json object?    Wouldn't it be great if there was an easy way to do that?   Suppose you only wanted the build date of the latest version?
+
+Try this: 
+[source,bash]
+$ skopeo inspect docker://registry.access.redhat.com/ubi7/ubi-minimal \
+| jq '.Labels."build-date"
+
+We have filtered with the handy https://stedolan.github.io/jq/[jq] filter to get out the element of the json in which we are interested.  Compare that to just piping through less to see the difference that jq provides.
+
+That was fun. Try to specify your own filters if you would like.
+
+===== Copy from Registry to Registry
+
+[source,bash]
+----
+$ skopeo copy docker://access.registry.com/ubi7/ubi docker://quay.io/jdbarlow/ubi:containers-workshop
+
+$ # you will need to replace "jdbarlow" with your own username
+$ # you will likely need to do a 'podman login quay.io' to do this.
+---- 
+
+If you get an "Error tyring to reuse blog" _and you are logged in_ just rerun the command and it should work.
+
+You should see the containers-workshop label
+
+image:skopeo_copied.png[It's here]
+
+That's great!   Let's delete it now
+
+===== Remote Delete
+
+[source,bash]
+$ skopeo delete docker://quay.io/jdbarlow/ubi:containers-workshop
+
+It's gone, just like that.  Refresh your quay.io registry if you don't believe us!
+
+Conclusion:   Skopeo is a handy tool for inspecting and managing repositories in remote and local registries.
 
 == Resources:
 
