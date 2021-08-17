@@ -8,29 +8,22 @@
 == Lab Exercises
 :toc:
 
-=== Exercise:  Setting up a registry account in Quay
-
+=== Exercise:  Setting up a registry account in Quay.io
 
 TIP: If you already have a registry account someplace that you can use from the lab, you don't need to create another one.  This is just a good place to get one for free.
 
-We’ll sign up for a free trial account on a registry.   If you have a container registry account already, you can use that.   The exercises are geared to Quay cloud register:
+These exercises are based off of Red Hat Enterprise Linux 8, and use the UBI (Universal Binary Images). To get free RHEL (up to 16 subscriptions per individual), as well as a Red Hat account for use with Quay, please go to https://developers.redhat.com and sign up for the free account.
+
+The exercises are geared to Quay cloud register, and the Quay registry is not rate limited for pulls. There is also free security scanning of your images. It is necessary to purchase a Quay.io subscription for private repositories.
 
 To create the account, go to:
 
-https://quay.io
-
-Sign up for the free account.
-
-NOTE: There is also a $15 / month with up to 5 private repositories available.
-No credit card is required to do the trial for the "Pro" subscription.
-
-The easiest is to do the totally free and use publicly visible repositories.
-
-To get the ree account, go to https://quay.io request an account as below:
-
 image::not-a-robot.png[Free Account]
 
-TIP:  I recommend that you check "I am not a robot (even if you really are a robot!)"
+https://quay.io
+
+Sign in with your Red Hat subscription credentials.
+
 
 === Exercise:  Setting up the Prerequisites on Red Hat Linux
 
